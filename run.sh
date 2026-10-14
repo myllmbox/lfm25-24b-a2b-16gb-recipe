@@ -135,6 +135,8 @@ trap 'kill "$LOGS" 2>/dev/null || true' EXIT INT TERM
 for i in $(seq 1 120); do
   if curl -sf -m 3 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     kill "$LOGS" 2>/dev/null || true; wait "$LOGS" 2>/dev/null || true
+    # the container runs as root — hand ./cache (compile caches written during boot) back to the host user
+    docker exec "$NAME" chown -R "$(id -u):$(id -g)" /cache >/dev/null 2>&1 || true
     # warm-up + self-check: one short request. The first real request then hits a warm engine, and the answer
     # (OAK, middle letter A) shows thinking and output both work.
     WMODEL="$(rkey vllm served-model-name)"
