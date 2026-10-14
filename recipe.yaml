@@ -1,0 +1,39 @@
+# The one and only config. run.sh reads THIS — there is nothing else to configure.
+# Flag mapping: `name: value` -> --name value | `name: true` -> --name | `name: false` -> omitted.
+
+server:
+  image: myllmbox/lfm25-24b-a2b-vllm:v1        # pinned public tag = vLLM 0.31.0 (vllm/vllm-openai, the checkpoint's validated runtime)
+                                                # + the myllmbox loader (load-format: mbx)
+  model: Blackfrost-AI/LFM2.5-24B-A2B-DERISKED-NVFP4   # HF repo — downloaded into ./models on first run (~14G)
+  port: 8000
+  models_dir: ./models
+  cache_dir: ./cache                            # compile caches; deletable, the next boot rebuilds them
+  min_free_vram_mib: 15700                      # run.sh refuses to start below this much free GPU memory: the serve uses ~15.6G of a
+                                                # 16G card, and running out of GPU memory can drop the card until a reboot. A card
+                                                # that also drives your desktop has less free — lower kv-cache-memory first.
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+vllm:
+  served-model-name: LFM2.5-24B-A2B-DERISKED-NVFP4
+  kv-cache-memory: "1600000000"                 # 1.6G fp8 = 156,125 KV tokens on a 16G card (measured, RTX 5080). The ONE knob for
+                                                # memory: lower it if the card drives a display or the boot runs out of memory;
+                                                # a 24/32G card can take several G more
+  kv-cache-dtype: fp8
+  max-model-len: 131072                         # the model's native max
+  max-num-seqs: 4                               # 4 requests at once share the KV pool
+  max-num-batched-tokens: 1024                  # prefill chunk — small, so long prompts do not spike memory
+  attention-backend: TRITON_ATTN                # fp8 KV without FlashInfer's extra attention workspace (~400M)
+  compilation-config: '{"mode":"none","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,3,4]}'
+                                                # decode CUDA graphs for 1-4 streams: ~9x faster than eager on this small-active model
+  kernel-config: '{"enable_flashinfer_autotune": false}'   # the autotune warm-up needs memory a 16G card does not have
+  enable-prefix-caching: true
+  load-format: mbx                              # weights in ~20 s, without filling the page cache
+  # Sampling defaults (a request's own temperature / top_k always wins). 0.1 is the publisher's setting: near-greedy, so the
+  # same prompt gives the same answer — poor variety. Raise temperature to 0.6-0.7 for more varied answers.
+  override-generation-config: '{"temperature":0.1,"top_k":50,"repetition_penalty":1.0}'
+  reasoning-parser: qwen3                       # the model always thinks; its reasoning arrives as reasoning_content
+  tool-call-parser: lfm2
+  enable-auto-tool-choice: true
